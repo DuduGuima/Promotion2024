@@ -1,5 +1,3 @@
-# Calcul de l'ensemble de Mandelbrot en python
-
 import numpy as np
 from dataclasses import dataclass
 from PIL import Image
@@ -14,6 +12,8 @@ comm=MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 result = [] # c est la liste qui obtenira les resultats
+
+index_work=[]
 
 
 @dataclass
@@ -61,28 +61,35 @@ mandelbrot_set = MandelbrotSet(max_iterations=50, escape_radius=10)
 width, height = 1024, 1024
 
 
-index_min = floor(rank*height/size)
-index_max = floor((rank+1)*height/size)
+
+#distribuition des index pour les processeurs...
+if rank == 0:
+    for i in range(size):
+        index_min = floor(i*height/size)
+        index_max = floor((i+1)*height/size)
+        index_work.append((index_min,index_max))
+
+#on envoye les index pour chaque processeur
+index_work=comm.scatter(index_work,root=0)
 
 scaleX = 3./width
 scaleY = 2.25/height
-convergence = np.empty((width, index_max-index_min), dtype=np.double)
-#print("L interval de cahque processeur est ",(index_min,index_max))
+convergence = np.empty((width, index_work[1] - index_work[0]), dtype=np.double)
+
 # Calcul de l'ensemble de mandelbrot :
 deb = time()
-for y in range(index_min,index_max):
+for y in range(index_work[0],index_work[1]):
     for x in range(width):
         c = complex(-2. + scaleX*x, -1.125 + scaleY * y)
-        convergence[x, y-index_min] = mandelbrot_set.convergence(c, smooth=True)
+        convergence[x, y-index_work[0]] = mandelbrot_set.convergence(c, smooth=True)
 fin = time()
 print(f"Temps du calcul de l'ensemble de Mandelbrot : {fin-deb}")
 
-result = comm.gather(convergence,root=0)
+
+
+result = comm.gather(convergence,root=0)#on envoye tous les resultats a zero
 
 # Constitution de l'image résultante :
-
-
-
 if rank==0:
     result = np.hstack(result)
     deb = time()
