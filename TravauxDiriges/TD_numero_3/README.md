@@ -9,3 +9,7 @@ Implémenter l'algorithme "bucket sort" tel que décrit sur les deux dernières 
 - tous les process participent au tri en parallèle,
 - le tableau trié est rassemblé sur le process 0.
 
+
+#Réponse
+
+J'ai décidé de 
