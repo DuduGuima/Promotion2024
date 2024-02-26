@@ -7,10 +7,7 @@ comm=MPI.COMM_WORLD
 rank=comm.Get_rank()
 size=comm.Get_size()#nbp
 
-n=10000000 #taille du vecteur initial
-
-initial_index= floor(rank * n/size)
-final_index=floor((rank+1)*n/size)
+n=1000 #taille du vecteur initial
 
 bucket= []
 sort_original=None
