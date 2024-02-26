@@ -64,26 +64,33 @@ width, height = 1024, 1024
 
 #distribuition des index pour les processeurs...
 if rank == 0:
-    for i in range(size):
-        index_min = floor(i*height/size)
-        index_max = floor((i+1)*height/size)
+    for i in range(0,size-1):
+        index_min = floor(i*height/(size-1))
+        index_max = floor((i+1)*height/(size-1))
         index_work.append((index_min,index_max))
 
 #on envoye les index pour chaque processeur
-index_work=comm.scatter(index_work,root=0)
+index_work=comm.bcast(index_work,root=0)
+
 
 scaleX = 3./width
 scaleY = 2.25/height
-convergence = np.empty((width, index_work[1] - index_work[0]), dtype=np.double)
+if rank == 0 :
+    convergence = None
+    
+if rank != 0:
+    convergence = np.empty((width, index_work[rank-1][1]-index_work[rank-1][0]), dtype=np.double)
+
 
 # Calcul de l'ensemble de mandelbrot :
-deb = time()
-for y in range(index_work[0],index_work[1]):
-    for x in range(width):
-        c = complex(-2. + scaleX*x, -1.125 + scaleY * y)
-        convergence[x, y-index_work[0]] = mandelbrot_set.convergence(c, smooth=True)
-fin = time()
-print(f"Temps du calcul de l'ensemble de Mandelbrot : {fin-deb}")
+if rank != 0:
+    deb = time()
+    for y in range(index_work[rank-1][0],index_work[rank-1][1]):
+        for x in range(width):
+            c = complex(-2. + scaleX*x, -1.125 + scaleY * y)
+            convergence[x, y-index_work[rank-1][0]] = mandelbrot_set.convergence(c, smooth=True)
+    fin = time()
+    print(f"Temps du calcul de l'ensemble de Mandelbrot : {fin-deb}")
 
 
 
@@ -91,7 +98,9 @@ result = comm.gather(convergence,root=0)#on envoye tous les resultats a zero
 
 # Constitution de l'image résultante :
 if rank==0:
+    result = result[1:]
     result = np.hstack(result)
+    
     deb = time()
     image = Image.fromarray(np.uint8(matplotlib.cm.plasma(result.T)*255))
     fin = time()
