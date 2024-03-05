@@ -23,16 +23,6 @@ On itère ensuite pour étudier la façon dont évolue la population des cellule
 """
 import pygame  as pg
 import numpy   as np
-from math import floor#pour partager la grille
-
-from mpi4py import MPI
-#on cree les comms
-
-comm = MPI.COMM_WORLD
-rank_i = comm.Get_rank()
-size_i = comm.Get_size()
-
-new_comm = comm.Create_group(comm.group.Excl([0]))
 
 
 class Grille:
@@ -59,11 +49,7 @@ class Grille:
             self.cells = np.random.randint(2, size=dim, dtype=np.uint8)
         self.col_life = color_life
         self.col_dead = color_dead
-    #c est la fontion qu on va modifier
-    #je vais utiliser la strategie:
-    #les processeurs de new_comm vont faire les calculs
-    #apres, ils vont partager leur resultats entre eux
-    #ces resultats seront envoyes a root 0, le processeur responsable pour afficher tout
+
     def compute_next_iteration(self):
         """
         Calcule la prochaine génération de cellules en suivant les règles du jeu de la vie
@@ -71,55 +57,32 @@ class Grille:
         # Remarque 1: on pourrait optimiser en faisant du vectoriel, mais pour plus de clarté, on utilise les boucles
         # Remarque 2: on voit la grille plus comme une matrice qu'une grille géométrique. L'indice (0,0) est donc en haut
         #             à gauche de la grille !
-        diff_cells = []
         ny = self.dimensions[0]
         nx = self.dimensions[1]
-        if rank_i==0:
-            next_cells=[]
-        if not new_comm==MPI.COMM_NULL:
-            rank_f = new_comm.Get_rank()
-            size_f = new_comm.Get_size()
-            
-
-            interval_min = floor(rank_f*ny/size_f)
-            interval_max = floor((rank_f+1)*ny/size_f)
-            next_cells = np.empty((interval_max - interval_min, self.dimensions[1]), dtype=np.uint8)
-
-            #print("for processus {}, the interval is ".format(rank_f), (interval_min,interval_max))
-
-            
-
-            
-            for i in range(interval_min,interval_max):
-                i_above = (i+ny-1)%ny
-                i_below = (i+1)%ny
-                for j in range(nx):
-                    j_left = (j-1+nx)%nx
-                    j_right= (j+1)%nx
-                    voisins_i = [i_above,i_above,i_above, i     , i      , i_below, i_below, i_below]
-                    voisins_j = [j_left ,j      ,j_right, j_left, j_right, j_left , j      , j_right]
-                    voisines = np.array(self.cells[voisins_i,voisins_j])
-                    nb_voisines_vivantes = np.sum(voisines)
-                    if self.cells[i,j] == 1: # Si la cellule est vivante
-                        if (nb_voisines_vivantes < 2) or (nb_voisines_vivantes > 3):
-                            next_cells[i-interval_min,j] = 0 # Cas de sous ou sur population, la cellule meurt
-                            diff_cells.append(i*nx+j)
-                        else:
-                            next_cells[i-interval_min,j] = 1 # Sinon elle reste vivante
-                    elif nb_voisines_vivantes == 3: # Cas où cellule morte mais entourée exactement de trois vivantes
-                        next_cells[i-interval_min,j] = 1         # Naissance de la cellule
+        next_cells = np.empty(self.dimensions, dtype=np.uint8)
+        diff_cells = []
+        for i in range(ny):
+            i_above = (i+ny-1)%ny
+            i_below = (i+1)%ny
+            for j in range(nx):
+                j_left = (j-1+nx)%nx
+                j_right= (j+1)%nx
+                voisins_i = [i_above,i_above,i_above, i     , i      , i_below, i_below, i_below]
+                voisins_j = [j_left ,j      ,j_right, j_left, j_right, j_left , j      , j_right]
+                voisines = np.array(self.cells[voisins_i,voisins_j])
+                nb_voisines_vivantes = np.sum(voisines)
+                if self.cells[i,j] == 1: # Si la cellule est vivante
+                    if (nb_voisines_vivantes < 2) or (nb_voisines_vivantes > 3):
+                        next_cells[i,j] = 0 # Cas de sous ou sur population, la cellule meurt
                         diff_cells.append(i*nx+j)
                     else:
-                        next_cells[i-interval_min,j] = 0         # Morte, elle reste morte.
-            
-        next_cells=comm.allgather(next_cells)
-        next_cells = np.vstack(next_cells[1:])
-        self.cells=next_cells
-        
-        diff_cells=np.array(diff_cells)
-        diff_cells = comm.allgather(diff_cells)
-        diff_cells = np.int32(np.hstack(diff_cells))
-        # print("For process {} after allgather: \n".format(rank_i),diff_cells//nx)
+                        next_cells[i,j] = 1 # Sinon elle reste vivante
+                elif nb_voisines_vivantes == 3: # Cas où cellule morte mais entourée exactement de trois vivantes
+                    next_cells[i,j] = 1         # Naissance de la cellule
+                    diff_cells.append(i*nx+j)
+                else:
+                    next_cells[i,j] = 0         # Morte, elle reste morte.
+        self.cells = next_cells
         return diff_cells
 
 
@@ -170,11 +133,7 @@ if __name__ == '__main__':
     import time
     import sys
 
-    
-
-    if rank_i == 0:
-        pg.init()
-
+    pg.init()
     dico_patterns = { # Dimension et pattern dans un tuple
         'blinker' : ((5,5),[(2,1),(2,2),(2,3)]),
         'toad'    : ((6,6),[(2,2),(2,3),(2,4),(3,3),(3,4),(3,5)]),
@@ -191,17 +150,9 @@ if __name__ == '__main__':
         "u" : ((200,200), [(101,101),(102,102),(103,102),(103,101),(104,103),(105,103),(105,102),(105,101),(105,105),(103,105),(102,105),(101,105),(101,104)]),
         "flat" : ((200,400), [(80,200),(81,200),(82,200),(83,200),(84,200),(85,200),(86,200),(87,200), (89,200),(90,200),(91,200),(92,200),(93,200),(97,200),(98,200),(99,200),(106,200),(107,200),(108,200),(109,200),(110,200),(111,200),(112,200),(114,200),(115,200),(116,200),(117,200),(118,200)])
     }
-
-    
-    #ici on crée les variables qui les processeurs vont utiliser
-     #tous les processeurs auront une grille, 0 pour l'afficher e les autres
-                #pour calculer son evolution 
-
-    #les processeurs de calcul n'utilisent que ces nouveaux rank/size
-
     choice = 'glider'
     if len(sys.argv) > 1 :
-            choice = sys.argv[1]
+        choice = sys.argv[1]
     resx = 800
     resy = 800
     if len(sys.argv) > 3 :
@@ -214,27 +165,17 @@ if __name__ == '__main__':
     except KeyError:
         print("No such pattern. Available ones are:", dico_patterns.keys())
         exit(1)
-    
-    
     grid = Grille(*init_pattern)
-    if rank_i==0:
-        appli = App((resx, resy), grid)
-    
-    # print("Processus {} has: \n".format(rank_i),grid.cells)
+    appli = App((resx, resy), grid)
+
     while True:
         #time.sleep(0.5) # A régler ou commenter pour vitesse maxi
-        #print("for process {} new_comm is : \n".format(rank_i), new_comm == MPI.COMM_NULL)
         t1 = time.time()
         diff = grid.compute_next_iteration()
         t2 = time.time()
-        #grid = comm.gather(grid,root=0)
-        #print("diff: {}\n".format(rank_i), diff)
-        if rank_i == 0:
-            appli.draw()
+        appli.draw()
         t3 = time.time()
-        if rank_i == 0:
-            print(f"Temps calcul prochaine generation : {t2-t1:2.2e} secondes, temps affichage : {t3-t2:2.2e} secondes\n")
-            for event in pg.event.get():
-                if event.type == pg.QUIT:
-                    pg.quit()
-            
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+        print(f"Temps calcul prochaine generation : {t2-t1:2.2e} secondes, temps affichage : {t3-t2:2.2e} secondes\n")
